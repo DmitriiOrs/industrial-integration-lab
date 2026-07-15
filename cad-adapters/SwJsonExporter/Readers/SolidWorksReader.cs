@@ -2,14 +2,14 @@
 using System.Collections.Generic;
 using SldWorks;
 using SwConst;
-using SwJsonExporter.Models;
+using SwJsonExporter.Domain;
 
-namespace SwJsonExporter.Services
+namespace SwJsonExporter.Readers
 {
-    public class AssemblyTraversalService
+    public class SolidWorksReader
     {
         // 1. ПУБЛИЧНЫЙ ДИСПЕТЧЕР: Точка входа для парсинга активной сборки
-        public ManufacturingNodeDto? ParseAssembly(IModelDoc2 swModel)
+        public CanonicalProduct? ParseAssembly(IModelDoc2 swModel)
         {
             // Защита от сбоев: проверяем, что документ открыт и это именно сборка (.SLDASM)
             if (swModel == null || swModel.GetType() != (int)swDocumentTypes_e.swDocASSEMBLY)
@@ -22,7 +22,7 @@ namespace SwJsonExporter.Services
             Console.WriteLine($"[Система] Запуск сканирования сборки: {rootTitle}...");
 
             // Создаем нулевой, корневой узел нашего завода (Уровень 0)
-            var rootNode = new ManufacturingNodeDto
+            var rootNode = new CanonicalProduct
             {
                 Id = $"ROOT-{rootTitle}", // В Шаге 2 заменим на IdGeneratorService
                 ParentId = null,         // У корня нет родителя
@@ -55,7 +55,7 @@ namespace SwJsonExporter.Services
         }
 
         // 2. РЕКУРСИВНЫЙ МОТОР: Проходит по всем уровням вложенности, зеркальным массивам и подсборкам
-        private void TraverseComponent(Component2 comp, ManufacturingNodeDto parentNode)
+        private void TraverseComponent(Component2 comp, CanonicalProduct parentNode)
         {
             // Игнорируем пустые ссылки и погашенные (Suppressed) компоненты — они не идут в производство
             if (comp == null || comp.IsSuppressed()) return;
@@ -65,13 +65,14 @@ namespace SwJsonExporter.Services
             bool isSubAssembly = pathName.EndsWith(".sldasm", StringComparison.OrdinalIgnoreCase);
 
             // 1. Создаем DTO-паспорт для текущей детали
-            var currentNode = new ManufacturingNodeDto
+            var currentNode = new CanonicalProduct
             {
                 Name = comp.Name2,
                 Level = parentNode.Level + 1,        // На 1 уровень глубже родителя
                 ParentId = parentNode.Id,            // Ссылка на родителя для плоских баз данных ERP
                 Path = $"{parentNode.Path}/{comp.Name2}", // Полный заводской путь
-                Type = isSubAssembly ? "SubAssembly" : "Part"
+                Type = isSubAssembly ? "SubAssembly" : "Part",
+                CustomProperties = ExtractCustomProperties(comp)
             };
 
             // Временно генерируем ID на основе системного номера CAD (в Шаге 2 подключим наш MD5-хэшер)
@@ -96,6 +97,53 @@ namespace SwJsonExporter.Services
                 // Это конечная деталь (Лист или Труба). 
                 // Здесь в Шаге 3 мы будем вызывать сканер Списка вырезов (Cut List)
             }
+        }
+        // 3. ЭКСТРАКТОР СВОЙСТВ: Безопасно вытягивает атрибуты детали (Материал, Артикул, Масса)
+        private Dictionary<string, string> ExtractCustomProperties(Component2 comp)
+        {
+            var properties = new Dictionary<string, string>();
+            if (comp == null) return properties;
+
+            // 1. Получаем саму 3D-модель (деталь или подсборку), на которую ссылается компонент
+            IModelDoc2 swModel = (IModelDoc2)comp.GetModelDoc2();
+
+            // Защита: Если деталь в легковесном режиме (Lightweight) или подавлена, модель может быть null
+            if (swModel == null) return properties;
+
+            // 2. Узнаем, какая именно конфигурация детали используется в сборке
+            string configName = comp.ReferencedConfiguration;
+
+            // 3. Обращаемся к диспетчеру свойств SOLIDWORKS для этой конфигурации
+            CustomPropertyManager propMgr = swModel.Extension.CustomPropertyManager[configName];
+
+            // 4. Получаем массив всех имен свойств, которые конструктор завел в карточке детали
+            object[] propNames = (object[])propMgr.GetNames();
+
+            if (propNames != null && propNames.Length > 0)
+            {
+                foreach (object nameObj in propNames)
+                {
+                    string propName = (string)nameObj;
+
+                    // Магия SOLIDWORKS API: Метод Get6 возвращает сразу и формулу, и готовое вычисленное значение
+                    propMgr.Get6(
+                        propName,
+                        false,
+                        out string valOut,          // Сырая формула (нас не интересует)
+                        out string resolvedValOut,  // Чистое вычисленное значение (наша цель!)
+                        out bool wasResolved,
+                        out bool linkToProp
+                    );
+
+                    // Если свойство не пустое — кладем его в наш словарь DTO
+                    if (!string.IsNullOrEmpty(resolvedValOut))
+                    {
+                        properties[propName] = resolvedValOut;
+                    }
+                }
+            }
+
+            return properties;
         }
     }
 }

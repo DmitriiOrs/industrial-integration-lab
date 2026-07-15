@@ -2,10 +2,10 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace SwJsonExporter.Models
+namespace SwJsonExporter.Domain
 {
     // Универсальный узел нашей промышленной сети данных (Единый источник истины)
-    public class ManufacturingNodeDto
+    public class CanonicalProduct
     {
         // Обязательные поля гибридной модели для ERP / PLM
         public string Id { get; set; } = string.Empty;
@@ -24,7 +24,7 @@ namespace SwJsonExporter.Models
         public SheetMetalData? SheetMetalProperties { get; set; }
 
         // Дочерние элементы (иерархическое дерево)
-        public List<ManufacturingNodeDto> ChildNodes { get; set; } = new();
+        public List<CanonicalProduct> ChildNodes { get; set; } = new();
     }
 
     public class WeldmentData

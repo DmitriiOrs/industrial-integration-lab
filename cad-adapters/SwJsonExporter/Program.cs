@@ -1,7 +1,8 @@
-﻿using System;
+﻿using SldWorks;
+using SwJsonExporter.Readers;
+using SwJsonExporter.Domain;
+using System;
 using System.Text.Json;
-using SldWorks;
-using SwJsonExporter.Services;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8; // Чтобы консоль Windows красиво писала по-русски
 Console.WriteLine("=== INDUSTRIAL INTEGRATION LAB: SW-JSON-EXPORTER ===");
@@ -14,7 +15,7 @@ try
     IModelDoc2 swModel = swApp.ActiveDoc;
 
     // 2. Запускаем наш сканер сборки
-    var traversalService = new AssemblyTraversalService();
+    var traversalService = new SolidWorksReader();
     var factoryData = traversalService.ParseAssembly(swModel);
 
     if (factoryData != null)
@@ -23,7 +24,9 @@ try
         var jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true, // Красивые отступы
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase // стиль id, parentId, level
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase, // стиль id, parentId, level
+            // Вот эта строчка разрешает JSON писать по-русски без кодирования в \u041F:
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
         string jsonResult = JsonSerializer.Serialize(factoryData, jsonOptions);
