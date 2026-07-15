@@ -1,45 +1,29 @@
-﻿using SldWorks;
+﻿using System;
 using SwJsonExporter.Readers;
-using SwJsonExporter.Domain;
-using System;
-using System.Text.Json;
+using SwJsonExporter.Exporters;
 
-Console.OutputEncoding = System.Text.Encoding.UTF8; // Чтобы консоль Windows красиво писала по-русски
-Console.WriteLine("=== INDUSTRIAL INTEGRATION LAB: SW-JSON-EXPORTER ===");
-Console.WriteLine("[Старт] Подключение к процессу SOLIDWORKS...");
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.WriteLine("=== INDUSTRIAL INTEGRATION PLATFORM (CORE CORE) ===");
 
 try
 {
-    // 1. Подключаемся к открытому SOLIDWORKS через COM Interop
-    SldWorks.SldWorks swApp = (SldWorks.SldWorks)Activator.CreateInstance(Type.GetTypeFromProgID("SldWorks.Application")!)!;
-    IModelDoc2 swModel = swApp.ActiveDoc;
+    // 1. Этап Извлечения (Reader) -> Вызываем нужный плагин чтения CAD
+    ICadReader reader = new SolidWorksReader();
+    var canonicalProduct = reader.ReadActiveDocument();
 
-    // 2. Запускаем наш сканер сборки
-    var traversalService = new SolidWorksReader();
-    var factoryData = traversalService.ParseAssembly(swModel);
+    // 2. Этап Обработки (Processing) -> Место для будущей очистки данных
+    // var cleanedProduct = new Normalizer().Process(canonicalProduct);
 
-    if (factoryData != null)
-    {
-        // 3. Упаковываем результат в красивый JSON по стандарту REST API
-        var jsonOptions = new JsonSerializerOptions
-        {
-            WriteIndented = true, // Красивые отступы
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase, // стиль id, parentId, level
-            // Вот эта строчка разрешает JSON писать по-русски без кодирования в \u041F:
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        };
-
-        string jsonResult = JsonSerializer.Serialize(factoryData, jsonOptions);
-
-        Console.WriteLine("\n--- ВЫГРУЖЕННЫЙ ПРОМЫШЛЕННЫЙ КОНТРАКТ ДАННЫХ (JSON) ---");
-        Console.WriteLine(jsonResult);
-    }
+    // 3. Этап Загрузки (Exporter) -> Выгружаем каноническую модель в нужный формат
+    IExporter exporter = new JsonExporter();
+    exporter.Export(canonicalProduct);
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"\n[Критическая ошибка] Не удалось связаться с SOLIDWORKS: {ex.Message}");
-    Console.WriteLine("Убедитесь, что SOLIDWORKS запущен и в нем открыта сборка изделия!");
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine($"\n[Критическая ошибка шины данных]: {ex.Message}");
+    Console.ResetColor();
 }
 
-Console.WriteLine("\nНажмите любую клавишу для завершения...");
+Console.WriteLine("\nНажмите любую клавишу для завершения работы конвейера...");
 Console.ReadKey();

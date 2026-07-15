@@ -1,144 +1,149 @@
 ﻿using System;
 using System.Collections.Generic;
-using SldWorks;
-using SwConst;
+using System.Runtime.Versioning;
 using SwJsonExporter.Domain;
+using SldWorks;
 
 namespace SwJsonExporter.Readers
 {
-    public class SolidWorksReader
+    [SupportedOSPlatform("windows")]
+    public class SolidWorksReader : ICadReader
     {
-        // 1. ПУБЛИЧНЫЙ ДИСПЕТЧЕР: Точка входа для парсинга активной сборки
-        public CanonicalProduct? ParseAssembly(IModelDoc2 swModel)
+        private readonly SolidWorksConnector _connector = new();
+
+        public bool IsAvailable() => true;
+
+        public CanonicalProduct ReadActiveDocument()
         {
-            // Защита от сбоев: проверяем, что документ открыт и это именно сборка (.SLDASM)
-            if (swModel == null || swModel.GetType() != (int)swDocumentTypes_e.swDocASSEMBLY)
-            {
-                Console.WriteLine("[Ошибка] Откройте сборку (.SLDASM) в SOLIDWORKS перед запуском сканера!");
-                return null;
-            }
+            // 1. Изолированное подключение через Коннектор
+            var swApp = _connector.Connect();
+            var swModel = _connector.GetActiveModel(swApp);
 
-            string rootTitle = swModel.GetTitle();
-            Console.WriteLine($"[Система] Запуск сканирования сборки: {rootTitle}...");
+            // 2. Запуск полного сканирования сборки
+            return ParseAssembly(swModel);
+        }
 
-            // Создаем нулевой, корневой узел нашего завода (Уровень 0)
+        private CanonicalProduct ParseAssembly(IModelDoc2 swModel)
+        {
+            string assemblyName = swModel.GetTitle();
+
+            // Создаем корневой паспорт изделия
             var rootNode = new CanonicalProduct
             {
-                Id = $"ROOT-{rootTitle}", // В Шаге 2 заменим на IdGeneratorService
-                ParentId = null,         // У корня нет родителя
+                Id = $"ROOT-{assemblyName}",
+                Name = assemblyName,
+                Path = assemblyName,
                 Level = 0,
-                Path = rootTitle,
-                Name = rootTitle,
-                Type = "Assembly"
+                Type = "Assembly",
+                // Читаем общие свойства самого документа сборки:
+                CustomProperties = ExtractCustomProperties(swModel, "")
             };
 
-            // Получаем конфигурацию и корневой компонент по стандарту SOLIDWORKS 2025
-            // параметр true гарантирует корректную работу с виртуальными деталями и легковесными компонентами
-            Configuration swConf = swModel.ConfigurationManager.ActiveConfiguration;
-            Component2 swRootComp = swConf.GetRootComponent3(true);
+            // Получаем доступ к дереву компонентов активной конфигурации
+            Configuration activeConfig = swModel.ConfigurationManager.ActiveConfiguration;
+            Component2 rootComponent = activeConfig.GetRootComponent3(true);
 
-            // Получаем список компонентов первого уровня (жесткое приведение типов по правилам .NET 8)
-            object[] children = (object[])swRootComp.GetChildren();
-
-            if (children != null && children.Length > 0)
+            if (rootComponent != null)
             {
-                foreach (object child in children)
+                // Получаем массив всех деталей первого уровня
+                object[] children = (object[])rootComponent.GetChildren();
+                if (children != null)
                 {
-                    Component2 swChildComp = (Component2)child;
-                    // Запускаем рекурсивное погружение
-                    TraverseComponent(swChildComp, rootNode);
+                    foreach (object childObj in children)
+                    {
+                        Component2 childComp = (Component2)childObj;
+                        TraverseComponent(childComp, rootNode);
+                    }
                 }
             }
 
-            Console.WriteLine($"[Система] Сканирование завершено! Собран скелет изделия.");
             return rootNode;
         }
 
-        // 2. РЕКУРСИВНЫЙ МОТОР: Проходит по всем уровням вложенности, зеркальным массивам и подсборкам
         private void TraverseComponent(Component2 comp, CanonicalProduct parentNode)
         {
-            // Игнорируем пустые ссылки и погашенные (Suppressed) компоненты — они не идут в производство
-            if (comp == null || comp.IsSuppressed()) return;
+            // Пропускаем подавленные (выключенные конструктором) детали
+            if (comp.IsSuppressed()) return;
 
-            // Определяем тип: если имя пути файла заканчивается на .sldasm — это подсборка
-            string pathName = comp.GetPathName();
-            bool isSubAssembly = pathName.EndsWith(".sldasm", StringComparison.OrdinalIgnoreCase);
+            bool isSubAssembly = (comp.GetChildren() != null && ((object[])comp.GetChildren()).Length > 0);
 
-            // 1. Создаем DTO-паспорт для текущей детали
+            // Формируем канонический узел для текущей детали
             var currentNode = new CanonicalProduct
             {
+                Id = $"{comp.Name2}-CADID-{comp.GetID()}",
                 Name = comp.Name2,
-                Level = parentNode.Level + 1,        // На 1 уровень глубже родителя
-                ParentId = parentNode.Id,            // Ссылка на родителя для плоских баз данных ERP
-                Path = $"{parentNode.Path}/{comp.Name2}", // Полный заводской путь
+                Level = parentNode.Level + 1,
+                ParentId = parentNode.Id,
+                Path = $"{parentNode.Path}/{comp.Name2}",
                 Type = isSubAssembly ? "SubAssembly" : "Part",
                 CustomProperties = ExtractCustomProperties(comp)
             };
 
-            // Временно генерируем ID на основе системного номера CAD (в Шаге 2 подключим наш MD5-хэшер)
-            int cadId = comp.GetID();
-            currentNode.Id = $"{comp.Name2}-CADID-{cadId}";
-
-            // 2. Привязываем эту деталь к списку детей родительского узла
+            // Добавляем деталь в список детей родителя
             parentNode.ChildNodes.Add(currentNode);
 
-            // 3. РЕКУРСИЯ: Проверяем, есть ли дети у ТЕКУЩЕГО компонента
-            object[] subChildren = (object[])comp.GetChildren();
-            if (subChildren != null && subChildren.Length > 0)
+            // Если это подсборка — рекурсивно ныряем внутрь неё
+            if (isSubAssembly)
             {
-                // Если внутри есть детали — наш метод вызывает САМ СЕБЯ для каждого ребенка
-                foreach (object subChild in subChildren)
+                object[] children = (object[])comp.GetChildren();
+                foreach (object childObj in children)
                 {
-                    TraverseComponent((Component2)subChild, currentNode);
+                    Component2 childComp = (Component2)childObj;
+                    TraverseComponent(childComp, currentNode);
                 }
             }
-            else
-            {
-                // Это конечная деталь (Лист или Труба). 
-                // Здесь в Шаге 3 мы будем вызывать сканер Списка вырезов (Cut List)
-            }
         }
-        // 3. ЭКСТРАКТОР СВОЙСТВ: Безопасно вытягивает атрибуты детали (Материал, Артикул, Масса)
+
+        // Экстрактор свойств для компонентов сборки
         private Dictionary<string, string> ExtractCustomProperties(Component2 comp)
         {
             var properties = new Dictionary<string, string>();
             if (comp == null) return properties;
 
-            // 1. Получаем саму 3D-модель (деталь или подсборку), на которую ссылается компонент
             IModelDoc2 swModel = (IModelDoc2)comp.GetModelDoc2();
-
-            // Защита: Если деталь в легковесном режиме (Lightweight) или подавлена, модель может быть null
             if (swModel == null) return properties;
 
-            // 2. Узнаем, какая именно конфигурация детали используется в сборке
-            string configName = comp.ReferencedConfiguration;
+            string[] managersToInspect = new string[] { comp.ReferencedConfiguration, "" };
+            return ExtractFromManagers(swModel, managersToInspect);
+        }
 
-            // 3. Обращаемся к диспетчеру свойств SOLIDWORKS для этой конфигурации
-            CustomPropertyManager propMgr = swModel.Extension.CustomPropertyManager[configName];
+        // Экстрактор свойств для главного документа
+        private Dictionary<string, string> ExtractCustomProperties(IModelDoc2 swModel, string configName)
+        {
+            return ExtractFromManagers(swModel, new string[] { configName });
+        }
 
-            // 4. Получаем массив всех имен свойств, которые конструктор завел в карточке детали
-            object[] propNames = (object[])propMgr.GetNames();
+        // Универсальный парсер карточек SOLIDWORKS (Get6)
+        private Dictionary<string, string> ExtractFromManagers(IModelDoc2 swModel, string[] configNames)
+        {
+            var properties = new Dictionary<string, string>();
 
-            if (propNames != null && propNames.Length > 0)
+            foreach (string configName in configNames)
             {
-                foreach (object nameObj in propNames)
+                CustomPropertyManager propMgr = swModel.Extension.CustomPropertyManager[configName];
+                if (propMgr == null) continue;
+
+                object[] propNames = (object[])propMgr.GetNames();
+                if (propNames != null && propNames.Length > 0)
                 {
-                    string propName = (string)nameObj;
-
-                    // Магия SOLIDWORKS API: Метод Get6 возвращает сразу и формулу, и готовое вычисленное значение
-                    propMgr.Get6(
-                        propName,
-                        false,
-                        out string valOut,          // Сырая формула (нас не интересует)
-                        out string resolvedValOut,  // Чистое вычисленное значение (наша цель!)
-                        out bool wasResolved,
-                        out bool linkToProp
-                    );
-
-                    // Если свойство не пустое — кладем его в наш словарь DTO
-                    if (!string.IsNullOrEmpty(resolvedValOut))
+                    foreach (object nameObj in propNames)
                     {
-                        properties[propName] = resolvedValOut;
+                        string propName = (string)nameObj;
+                        if (properties.ContainsKey(propName)) continue;
+
+                        propMgr.Get6(
+                            propName,
+                            false,
+                            out string valOut,
+                            out string resolvedValOut,
+                            out bool wasResolved,
+                            out bool linkToProp
+                        );
+
+                        if (!string.IsNullOrEmpty(resolvedValOut))
+                        {
+                            properties[propName] = resolvedValOut;
+                        }
                     }
                 }
             }
