@@ -4,6 +4,20 @@ namespace SwJsonExporter.Domain
     // Единая каноническая модель изделия для завода (не зависит от CAD или ERP)
     public class CanonicalProduct
     {
+        /*
+        private int _level; // Скрытая переменная
+
+        public int Level 
+        { 
+            get { return _level; } 
+            set 
+            { 
+                if (value < 0) 
+                    throw new Exception("Уровень сборки не может быть отрицательным!");
+                _level = value; 
+            } 
+        }
+        */
         public string Id { get; set; } = string.Empty;
         public string? ParentId { get; set; }
         public int Level { get; set; }

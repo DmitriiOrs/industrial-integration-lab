@@ -51,6 +51,10 @@ namespace SwJsonExporter.Readers
         {
             string assemblyName = swModel.GetTitle();
 
+            Configuration activeConfig = swModel.ConfigurationManager.ActiveConfiguration;
+
+            string[] rootManager = new string[] { activeConfig.Name, "" };
+
             // Создаем корневой паспорт изделия
             var rootNode = new CanonicalProduct
             {
@@ -62,9 +66,7 @@ namespace SwJsonExporter.Readers
                 // Читаем общие свойства самого документа сборки:
                 CustomProperties = ExtractCustomProperties(swModel, "")
             };
-
-            // Получаем доступ к дереву компонентов активной конфигурации
-            Configuration activeConfig = swModel.ConfigurationManager.ActiveConfiguration;
+            
             Component2 rootComponent = activeConfig.GetRootComponent3(true);
 
             if (rootComponent != null)
