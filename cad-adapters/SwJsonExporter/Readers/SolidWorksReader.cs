@@ -50,21 +50,21 @@ namespace SwJsonExporter.Readers
         private CanonicalProduct ParseAssembly(IModelDoc2 swModel)
         {
             string assemblyName = swModel.GetTitle();
-
             Configuration activeConfig = swModel.ConfigurationManager.ActiveConfiguration;
 
-            string[] rootManager = new string[] { activeConfig.Name, "" };
+            string configName = activeConfig.Name;
+            string[] rootManagers = new string[] { activeConfig.Name, "" };
 
             // Создаем корневой паспорт изделия
             var rootNode = new CanonicalProduct
             {
-                Id = $"ROOT-{assemblyName}",
-                Name = assemblyName,
+                Id = $"ROOT-{assemblyName}-{configName}",
+                Name = $"{assemblyName} ({configName})",
                 Path = assemblyName,
                 Level = 0,
                 Type = "Assembly",
                 // Читаем общие свойства самого документа сборки:
-                CustomProperties = ExtractCustomProperties(swModel, "")
+                CustomProperties = ExtractFromManagers(swModel, rootManagers)
             };
             
             Component2 rootComponent = activeConfig.GetRootComponent3(true);
@@ -91,7 +91,14 @@ namespace SwJsonExporter.Readers
             // Пропускаем подавленные (выключенные конструктором) детали
             if (comp.IsSuppressed()) return;
 
+            string[] childManagers = new string[] { comp.ReferencedConfiguration, "" };
             bool isSubAssembly = (comp.GetChildren() != null && ((object[])comp.GetChildren()).Length > 0);
+
+            IModelDoc2 childModel = (IModelDoc2)comp.GetModelDoc2();
+
+            var properties = childModel != null
+            ? ExtractFromManagers(childModel, childManagers)
+            : new Dictionary<string, string>();
 
             // Формируем канонический узел для текущей детали
             var currentNode = new CanonicalProduct
@@ -102,7 +109,7 @@ namespace SwJsonExporter.Readers
                 ParentId = parentNode.Id,
                 Path = $"{parentNode.Path}/{comp.Name2}",
                 Type = isSubAssembly ? "SubAssembly" : "Part",
-                CustomProperties = ExtractCustomProperties(comp)
+                CustomProperties = properties
             };
 
             // Добавляем деталь в список детей родителя
@@ -183,25 +190,6 @@ namespace SwJsonExporter.Readers
                 }
             }
             return properties;
-        }
-
-        // Экстрактор свойств для компонентов сборки
-        private Dictionary<string, string> ExtractCustomProperties(Component2 comp)
-        {
-            var properties = new Dictionary<string, string>();
-            if (comp == null) return properties;
-
-            IModelDoc2 swModel = (IModelDoc2)comp.GetModelDoc2();
-            if (swModel == null) return properties;
-
-            string[] managersToInspect = new string[] { comp.ReferencedConfiguration, "" };
-            return ExtractFromManagers(swModel, managersToInspect);
-        }
-
-        // Экстрактор свойств для главного документа
-        private Dictionary<string, string> ExtractCustomProperties(IModelDoc2 swModel, string configName)
-        {
-            return ExtractFromManagers(swModel, new string[] { configName });
         }
 
         // Универсальный парсер карточек SOLIDWORKS (Get6)
