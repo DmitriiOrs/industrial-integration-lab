@@ -1,5 +1,5 @@
-﻿
-using SwJsonExporter.Domain;
+﻿using SwJsonExporter.Domain;
+
 
 namespace SwJsonExporter.Exporters
 {

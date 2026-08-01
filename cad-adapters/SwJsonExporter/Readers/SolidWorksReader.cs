@@ -53,7 +53,7 @@ namespace SwJsonExporter.Readers
             Configuration activeConfig = swModel.ConfigurationManager.ActiveConfiguration;
 
             string configName = activeConfig.Name;
-            string[] rootManagers = new string[] { activeConfig.Name, "" };
+            string[] rootManagers = new string[] { configName, "" };
 
             // Создаем корневой паспорт изделия
             var rootNode = new CanonicalProduct
