@@ -21,24 +21,18 @@ namespace SwJsonExporter.Readers
 
             try
             {
-                // 1. ВТЫКАЕМ КАБЕЛЬ
                 swApp = _connector.Connect();
                 swModel = _connector.GetActiveModel(swApp);
 
-                // 2. Запуск полного сканирования сборки
                 return ParseAssembly(swModel);
             }
             finally
             {
-                // 3. БЛОК FINALLY (Выполняется ВСЕГДА, даже если внутри произошла авария и вылетел throw!)
-
-                // Вручную выдергиваем штекер из модели
                 if (swModel != null)
                 {
                     Marshal.ReleaseComObject(swModel);
                 }
 
-                // Вручную выдергиваем штекер из самого Солида
                 if (swApp != null)
                 {
                     Marshal.ReleaseComObject(swApp);
@@ -55,7 +49,6 @@ namespace SwJsonExporter.Readers
             string configName = activeConfig.Name;
             string[] rootManagers = new string[] { configName, "" };
 
-            // Создаем корневой паспорт изделия
             var rootNode = new CanonicalProduct
             {
                 Id = $"ROOT-{assemblyName}-{configName}",
@@ -63,7 +56,6 @@ namespace SwJsonExporter.Readers
                 Path = assemblyName,
                 Level = 0,
                 Type = "Assembly",
-                // Читаем общие свойства самого документа сборки:
                 CustomProperties = ExtractFromManagers(swModel, rootManagers)
             };
             
@@ -71,7 +63,6 @@ namespace SwJsonExporter.Readers
 
             if (rootComponent != null)
             {
-                // Получаем массив всех деталей первого уровня
                 object[] children = (object[])rootComponent.GetChildren();
                 if (children != null)
                 {
@@ -88,7 +79,6 @@ namespace SwJsonExporter.Readers
 
         private void TraverseComponent(Component2 comp, CanonicalProduct parentNode)
         {
-            // Пропускаем подавленные (выключенные конструктором) детали
             if (comp.IsSuppressed()) return;
 
             string[] childManagers = new string[] { comp.ReferencedConfiguration, "" };
@@ -100,7 +90,6 @@ namespace SwJsonExporter.Readers
             ? ExtractFromManagers(childModel, childManagers)
             : new Dictionary<string, string>();
 
-            // Формируем канонический узел для текущей детали
             var currentNode = new CanonicalProduct
             {
                 Id = $"{comp.Name2}-CADID-{comp.GetID()}",
@@ -112,13 +101,10 @@ namespace SwJsonExporter.Readers
                 CustomProperties = properties
             };
 
-            // Добавляем деталь в список детей родителя
             parentNode.ChildNodes.Add(currentNode);
 
-            // === ИЗМЕНЕНИЕ 1: Разделяем логику для Сборок и Деталей ===
             if (isSubAssembly)
             {
-                // Если это подсборка — рекурсивно ныряем внутрь её компонентов
                 object[] children = (object[])comp.GetChildren();
                 foreach (object childObj in children)
                 {
@@ -128,12 +114,10 @@ namespace SwJsonExporter.Readers
             }
             else
             {
-                // Если это деталь — запускаем сканер многотелок (списков вырезов)
                 ExtractCutListsFromPart(comp, currentNode);
             }
         }
 
-        // === ИЗМЕНЕНИЕ 2: Новый метод сканирования папок Cut-List внутри детали ===
         private void ExtractCutListsFromPart(Component2 comp, CanonicalProduct currentNode)
         {
             IModelDoc2 swModel = (IModelDoc2)comp.GetModelDoc2();
@@ -146,18 +130,16 @@ namespace SwJsonExporter.Readers
                 {
                     BodyFolder swBodyFolder = (BodyFolder)swFeat.GetSpecificFeature2();
 
-                    // Берем только непустые папки, где есть реальные листовые тела
                     if (swBodyFolder != null && swBodyFolder.GetBodyCount() > 0)
                     {
                         var cutListNode = new CanonicalProduct
                         {
                             Id = $"{currentNode.Id}-CUT-{swFeat.Name}",
-                            Name = swFeat.Name,                    // Например: "Sheet<2>"
-                            Level = currentNode.Level + 1,         // Лист становится дочерним узлом детали
+                            Name = swFeat.Name,
+                            Level = currentNode.Level + 1,
                             ParentId = currentNode.Id,
                             Path = $"{currentNode.Path}/{swFeat.Name}",
                             Type = "SheetMetalCut",
-                            // Читаем свойства именно этого выреза:
                             CustomProperties = ExtractCutListProperties(swFeat)
                         };
 
@@ -168,7 +150,6 @@ namespace SwJsonExporter.Readers
             }
         }
 
-        // === ИЗМЕНЕНИЕ 3: Новый метод извлечения свойств (длина, ширина, материал) из выреза ===
         private Dictionary<string, string> ExtractCutListProperties(Feature swFeat)
         {
             var properties = new Dictionary<string, string>();
@@ -192,7 +173,6 @@ namespace SwJsonExporter.Readers
             return properties;
         }
 
-        // Универсальный парсер карточек SOLIDWORKS (Get6)
         private Dictionary<string, string> ExtractFromManagers(IModelDoc2 swModel, string[] configNames)
         {
             var properties = new Dictionary<string, string>();
@@ -202,21 +182,7 @@ namespace SwJsonExporter.Readers
                 ICustomPropertyManager propMgr = swModel.Extension.CustomPropertyManager[configName];
                 if (propMgr == null) continue;
 
-                /*object[] propNames = (object[])propMgr.GetNames();
-
-                if (propNames != null && propNames.Length > 0)
-                {
-                   В чистом C# этот цикл можно заменить на LINQ в одну строку:
-                    // string[] names = propNames.Cast<string>().ToArray();
-
-                    // Но для безопасной отладки СОЛИДА используем явный цикл:
-                    foreach (object nameObj in propNames)
-                    {
-                        string propName = (string)nameObj;
-                        // ... дальнейшая логика ...
-                    }
-                }*/
-
+    
                 object[] propNames = (object[])propMgr.GetNames();
                 if (propNames != null && propNames.Length > 0)
                 {

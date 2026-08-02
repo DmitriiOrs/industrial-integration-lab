@@ -4,14 +4,14 @@ using SldWorks;
 
 namespace SwJsonExporter.Readers
 {
-    [SupportedOSPlatform("windows")] // Заявляем, что этот мост работает только под Windows
+    [SupportedOSPlatform("windows")]
     public class SolidWorksConnector
     {
         public ISldWorks Connect()
         {
             var swApp = (ISldWorks)Activator.CreateInstance(Type.GetTypeFromProgID("SldWorks.Application")!)!;
             if (swApp == null)
-                throw new InvalidOperationException("Не удалось подключиться к процессу SOLIDWORKS.");
+                throw new InvalidOperationException("Failed to connect to SOLIDWORKS.");
             return swApp;
         }
 
@@ -19,7 +19,7 @@ namespace SwJsonExporter.Readers
         {
             var swModel = (IModelDoc2)swApp.ActiveDoc;
             if (swModel == null)
-                throw new InvalidOperationException("В SOLIDWORKS нет открытого документа для сканирования!");
+                throw new InvalidOperationException("There is no open document to scan in SOLIDWORKS.");
             return swModel;
         }
     }
