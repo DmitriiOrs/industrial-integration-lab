@@ -4,12 +4,14 @@ using System.Runtime.Versioning;
 using SwJsonExporter.Domain;
 using SldWorks;
 using System.Runtime.InteropServices;
+using Serilog;
 
 namespace SwJsonExporter.Readers
 {
     [SupportedOSPlatform("windows")]
     public class SolidWorksReader : ICadReader
     {
+        private static readonly ILogger Log = Serilog.Log.ForContext<SolidWorksReader>();
         private readonly SolidWorksConnector _connector = new();
 
         public bool IsAvailable() => true;
@@ -21,6 +23,7 @@ namespace SwJsonExporter.Readers
 
             try
             {
+                Log.Information("Connecting to active SOLIDWORKS");
                 swApp = _connector.Connect();
                 swModel = _connector.GetActiveModel(swApp);
 
@@ -43,6 +46,7 @@ namespace SwJsonExporter.Readers
 
         private CanonicalProduct ParseAssembly(IModelDoc2 swModel)
         {
+            Log.Information("Parse SW model");
             string assemblyName = swModel.GetTitle();
             Configuration activeConfig = swModel.ConfigurationManager.ActiveConfiguration;
 

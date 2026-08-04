@@ -1,24 +1,35 @@
 ﻿using System;
 using SwJsonExporter.Readers;
 using SwJsonExporter.Exporters;
+using Serilog;
 
-Console.OutputEncoding = System.Text.Encoding.UTF8;
-Console.WriteLine("=== INDUSTRIAL INTEGRATION PLATFORM (CORE CORE) ===");
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .WriteTo.Console()
+    .WriteTo.File(@"C:\Temp\ExportLogs\etl-export-.txt", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
 
 try
 {
+    Log.Information("=== INDUSTRIAL INTEGRATION PLATFORM (CORE) ===");
+    Log.Information("Starting extraction pipeline...");
+
     ICadReader reader = new SolidWorksReader();
     var canonicalProduct = reader.ReadActiveDocument();
 
     IExporter exporter = new JsonExporter();
     exporter.Export(canonicalProduct);
+
+    Log.Information("Extraction pipeline finished successfully.");
 }
 catch (Exception ex)
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine($"\n[Critical data bus error]: {ex.Message}");
-    Console.ResetColor();
+    Log.Fatal(ex, "Critical data bus error during extraction!");
 }
+finally
+{
+    Console.WriteLine("\nPress any key to stop the conveyor...");
+    Console.ReadKey();
 
-Console.WriteLine("\nPress any key to stop the conveyor...");
-Console.ReadKey();
+    Log.CloseAndFlush();
+}

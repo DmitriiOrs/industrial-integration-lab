@@ -1,12 +1,15 @@
-﻿using System;
-using System.Text.Json;
+﻿using Serilog;
 using SwJsonExporter.Domain;
+using SwJsonExporter.Readers;
+using System;
 using System.IO;
+using System.Text.Json;
 
 namespace SwJsonExporter.Exporters
 {
     public class JsonExporter : IExporter
     {
+        private static readonly ILogger Log = Serilog.Log.ForContext<JsonExporter>();
         public void Export(CanonicalProduct product)
         {
             var jsonOptions = new JsonSerializerOptions
@@ -18,13 +21,12 @@ namespace SwJsonExporter.Exporters
 
             string jsonResult = JsonSerializer.Serialize(product, jsonOptions);
 
-            Console.WriteLine("\n--- UPLOADED CANONICAL PRODUCT MODEL (JSON) ---");
-            Console.WriteLine(jsonResult);
+            Log.Information("UPLOADED CANONICAL PRODUCT MODEL (JSON)");
 
             string filePath = @"C:\Temp\ExportedAssembly.json";
             File.WriteAllText(filePath, jsonResult);
 
-            Console.WriteLine($"\n[SUCCESS] File saved successfully to path: {filePath}");
+            Log.Information("[SUCCESS] File saved successfully");
         }
     }
     
