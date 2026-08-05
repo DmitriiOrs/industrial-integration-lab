@@ -1,10 +1,11 @@
-﻿using System;
-using SwJsonExporter.Readers;
+﻿using Serilog;
 using SwJsonExporter.Exporters;
-using Serilog;
+using SwJsonExporter.Processing;
+using SwJsonExporter.Readers;
+using System;
 
 Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Debug()
+    .MinimumLevel.Information()
     .WriteTo.Console()
     .WriteTo.File(@"C:\Temp\ExportLogs\etl-export-.txt", rollingInterval: RollingInterval.Day)
     .CreateLogger();
@@ -16,6 +17,9 @@ try
 
     ICadReader reader = new SolidWorksReader();
     var canonicalProduct = reader.ReadActiveDocument();
+
+    var normalizer = new DataNormalizer();
+    normalizer.Normalize(canonicalProduct);
 
     IExporter exporter = new JsonExporter();
     exporter.Export(canonicalProduct);

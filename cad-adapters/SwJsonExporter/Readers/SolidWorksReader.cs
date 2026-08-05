@@ -8,7 +8,6 @@ using Serilog;
 
 namespace SwJsonExporter.Readers
 {
-    [SupportedOSPlatform("windows")]
     public class SolidWorksReader : ICadReader
     {
         private static readonly ILogger Log = Serilog.Log.ForContext<SolidWorksReader>();
