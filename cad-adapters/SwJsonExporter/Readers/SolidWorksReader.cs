@@ -117,6 +117,7 @@ namespace SwJsonExporter.Readers
             }
             else
             {
+                InvestigateInsertedParts(comp);
                 ExtractCutListsFromPart(comp, currentNode);
             }
         }
@@ -135,6 +136,25 @@ namespace SwJsonExporter.Readers
 
                     if (swBodyFolder != null && swBodyFolder.GetBodyCount() > 0)
                     {
+                        object[] bodies = (object[])swBodyFolder.GetBodies();
+                        if (bodies != null && bodies.Length > 0)
+                        {
+                            Body2 swBody = (Body2)bodies[0];
+                            string bodyName = swBody.Name;
+
+                            double[] massProps = (double[])swBody.GetMassProperties(1.0);
+
+                            if (massProps != null && massProps.Length >= 6)
+                            {
+                                double mass = massProps[3];
+                                double volume = massProps[4];
+                                double surfaceArea = massProps[5];
+
+                                Log.Information("  -> ТЕЛО: {BodyName} | CutList: {CutName}", bodyName, swFeat.Name);
+                                Log.Information("     Масса: {Mass} | Объем: {Vol}", mass, volume);
+                            }
+                        }
+
                         var cutListNode = new CanonicalProduct
                         {
                             Id = $"{currentNode.Id}-CUT-{swFeat.Name}",
@@ -213,5 +233,54 @@ namespace SwJsonExporter.Readers
 
             return properties;
         }
+        private void InvestigateInsertedParts(Component2 swComponent)
+        {
+            IModelDoc2 swModel = (IModelDoc2)swComponent.GetModelDoc2();
+            if (swModel == null) return;
+
+            Log.Information("--- Investigation of the part: {CompName} ---", swComponent.Name2);
+
+            Feature swFeature = (Feature)swModel.FirstFeature();
+
+            while (swFeature != null)
+            {
+                string typeName = swFeature.GetTypeName2();
+                string featureName = swFeature.Name;
+
+                if (typeName == "Stock" || typeName == "MirrorStock" || typeName == "DerivedPart")
+                {
+                    Log.Warning("!!! INSERT FEATURE FOUND !!!");
+                    Log.Information("Feature name: {Name}", featureName);
+                    Log.Information("Feature type: {Type}", typeName);
+
+                    try
+                    {
+                        object featData = swFeature.GetDefinition();
+
+                        if (featData != null)
+                        {
+                            IDerivedPartFeatureData derivedData = (IDerivedPartFeatureData)featData;
+
+                            string masterModelPath = derivedData.PathName;
+
+                            Log.Information(">>> Path to the Master Model: {Path} <<<", masterModelPath);
+                        }
+                        else
+                        {
+                            Log.Warning("Failed to retrieve the definition for the feature.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error("Error retrieving path: {Msg}", ex.Message);
+                    }
+                }
+
+                swFeature = (Feature)swFeature.GetNextFeature();
+            }
+
+            Log.Information("End of the investigation");
+        }
+
     }
 }
