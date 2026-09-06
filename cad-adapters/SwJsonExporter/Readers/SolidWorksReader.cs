@@ -10,6 +10,7 @@ namespace SwJsonExporter.Readers
 {
     public class SolidWorksReader : ICadReader
     {
+        public record BodySignature(string LocalName, double Volume, double SurfaceArea, double X, double Y, double Z);
         private static readonly ILogger Log = Serilog.Log.ForContext<SolidWorksReader>();
         private readonly SolidWorksConnector _connector = new();
 
@@ -26,7 +27,7 @@ namespace SwJsonExporter.Readers
                 swApp = _connector.Connect();
                 swModel = _connector.GetActiveModel(swApp);
 
-                return ParseAssembly(swModel);
+                return ParseAssembly(swModel, swApp);
             }
             finally
             {
@@ -40,10 +41,9 @@ namespace SwJsonExporter.Readers
                     Marshal.ReleaseComObject(swApp);
                 }
             }
-                                
         }
 
-        private CanonicalProduct ParseAssembly(IModelDoc2 swModel)
+        private CanonicalProduct ParseAssembly(IModelDoc2 swModel, ISldWorks swApp)
         {
             Log.Information("Parse SW model");
             string assemblyName = swModel.GetTitle();
@@ -61,7 +61,7 @@ namespace SwJsonExporter.Readers
                 Type = "Assembly",
                 CustomProperties = ExtractFromManagers(swModel, rootManagers)
             };
-            
+
             Component2 rootComponent = activeConfig.GetRootComponent3(true);
 
             if (rootComponent != null)
@@ -72,7 +72,7 @@ namespace SwJsonExporter.Readers
                     foreach (object childObj in children)
                     {
                         Component2 childComp = (Component2)childObj;
-                        TraverseComponent(childComp, rootNode);
+                        TraverseComponent(childComp, rootNode, swApp);
                     }
                 }
             }
@@ -80,7 +80,7 @@ namespace SwJsonExporter.Readers
             return rootNode;
         }
 
-        private void TraverseComponent(Component2 comp, CanonicalProduct parentNode)
+        private void TraverseComponent(Component2 comp, CanonicalProduct parentNode, ISldWorks swApp)
         {
             if (comp.IsSuppressed()) return;
 
@@ -112,12 +112,12 @@ namespace SwJsonExporter.Readers
                 foreach (object childObj in children)
                 {
                     Component2 childComp = (Component2)childObj;
-                    TraverseComponent(childComp, currentNode);
+                    TraverseComponent(childComp, currentNode, swApp);
                 }
             }
             else
             {
-                InvestigateInsertedParts(comp);
+                InvestigateInsertedParts(comp, swApp, currentNode);
                 ExtractCutListsFromPart(comp, currentNode);
             }
         }
@@ -205,7 +205,6 @@ namespace SwJsonExporter.Readers
                 ICustomPropertyManager propMgr = swModel.Extension.CustomPropertyManager[configName];
                 if (propMgr == null) continue;
 
-    
                 object[] propNames = (object[])propMgr.GetNames();
                 if (propNames != null && propNames.Length > 0)
                 {
@@ -233,7 +232,8 @@ namespace SwJsonExporter.Readers
 
             return properties;
         }
-        private void InvestigateInsertedParts(Component2 swComponent)
+
+        private void InvestigateInsertedParts(Component2 swComponent, ISldWorks swApp, CanonicalProduct currentNode)
         {
             IModelDoc2 swModel = (IModelDoc2)swComponent.GetModelDoc2();
             if (swModel == null) return;
@@ -241,46 +241,132 @@ namespace SwJsonExporter.Readers
             Log.Information("--- Investigation of the part: {CompName} ---", swComponent.Name2);
 
             Feature swFeature = (Feature)swModel.FirstFeature();
+            string masterModelPath = string.Empty;
 
             while (swFeature != null)
             {
                 string typeName = swFeature.GetTypeName2();
-                string featureName = swFeature.Name;
-
                 if (typeName == "Stock" || typeName == "MirrorStock" || typeName == "DerivedPart")
                 {
-                    Log.Warning("!!! INSERT FEATURE FOUND !!!");
-                    Log.Information("Feature name: {Name}", featureName);
-                    Log.Information("Feature type: {Type}", typeName);
-
                     try
                     {
                         object featData = swFeature.GetDefinition();
-
                         if (featData != null)
                         {
                             IDerivedPartFeatureData derivedData = (IDerivedPartFeatureData)featData;
-
-                            string masterModelPath = derivedData.PathName;
-
-                            Log.Information(">>> Path to the Master Model: {Path} <<<", masterModelPath);
-                        }
-                        else
-                        {
-                            Log.Warning("Failed to retrieve the definition for the feature.");
+                            masterModelPath = derivedData.PathName;
+                            Log.Information(">>> Master Model found: {Path} <<<", masterModelPath);
+                            break;
                         }
                     }
                     catch (Exception ex)
                     {
-                        Log.Error("Error retrieving path: {Msg}", ex.Message);
+                        Log.Error("Error retrieving master path: {Msg}", ex.Message);
                     }
                 }
-
                 swFeature = (Feature)swFeature.GetNextFeature();
             }
 
-            Log.Information("End of the investigation");
-        }
+            if (string.IsNullOrEmpty(masterModelPath))
+            {
+                Log.Information("End of the investigation\n");
+                return;
+            }
 
+            var localSignatures = new List<BodySignature>();
+            object[] bodies = (object[])swComponent.GetBodies3(0, out _);
+
+            if (bodies != null && bodies.Length > 0)
+            {
+                foreach (object bodyObj in bodies)
+                {
+                    Body2 swBody = (Body2)bodyObj;
+                    double[] massProps = (double[])swBody.GetMassProperties(1.0);
+
+                    if (massProps != null && massProps.Length >= 6)
+                    {
+                        localSignatures.Add(new BodySignature(
+                            swBody.Name,
+                            Math.Round(massProps[4], 5), // Volume
+                            Math.Round(massProps[5], 5), // SurfaceArea
+                            Math.Round(massProps[0], 5), // X
+                            Math.Round(massProps[1], 5), // Y
+                            Math.Round(massProps[2], 5)  // Z
+                        ));
+                    }
+                }
+            }
+
+            int errors = 0;
+            int warnings = 0;
+            Log.Information("Opening Master Model silently to extract Cut List properties...");
+
+            IModelDoc2 masterModel = swApp.OpenDoc6(masterModelPath, 1, 2, "", ref errors, ref warnings);
+
+            if (masterModel != null)
+            {
+                Feature masterFeat = (Feature)masterModel.FirstFeature();
+
+                while (masterFeat != null)
+                {
+                    if (masterFeat.GetTypeName2() == "CutListFolder")
+                    {
+                        BodyFolder swBodyFolder = (BodyFolder)masterFeat.GetSpecificFeature2();
+
+                        if (swBodyFolder != null && swBodyFolder.GetBodyCount() > 0)
+                        {
+                            object[] masterBodies = (object[])swBodyFolder.GetBodies();
+                            if (masterBodies != null && masterBodies.Length > 0)
+                            {
+                                Body2 masterBody = (Body2)masterBodies[0];
+                                double[] mProps = (double[])masterBody.GetMassProperties(1.0);
+
+                                if (mProps != null && mProps.Length >= 6)
+                                {
+                                    double mVol = Math.Round(mProps[4], 5);
+                                    double mArea = Math.Round(mProps[5], 5);
+                                    double mX = Math.Round(mProps[0], 5);
+                                    double mY = Math.Round(mProps[1], 5);
+                                    double mZ = Math.Round(mProps[2], 5);
+
+                                    foreach (var sig in localSignatures)
+                                    {
+                                        bool isVolumeMatch = Math.Abs(sig.Volume - mVol) < 0.0001;
+                                        bool isAreaMatch = Math.Abs(sig.SurfaceArea - mArea) < 0.0001;
+
+                                        bool isXMatch = Math.Abs(Math.Abs(sig.X) - Math.Abs(mX)) < 0.0001;
+                                        bool isYMatch = Math.Abs(Math.Abs(sig.Y) - Math.Abs(mY)) < 0.0001;
+                                        bool isZMatch = Math.Abs(Math.Abs(sig.Z) - Math.Abs(mZ)) < 0.0001;
+
+                                        if (isVolumeMatch && isAreaMatch && isXMatch && isYMatch && isZMatch)
+                                        {
+                                            Log.Information("MATCH: '{Local}' == '{MasterCut}'", sig.LocalName, masterFeat.Name);
+
+                                            var properties = ExtractCutListProperties(masterFeat);
+                                            foreach (var prop in properties)
+                                            {
+                                                string propKey = $"Master_{masterFeat.Name}_{prop.Key}";
+                                                currentNode.CustomProperties[propKey] = prop.Value;
+                                                Log.Information("    + {Key}: {Value}", propKey, prop.Value);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    masterFeat = (Feature)masterFeat.GetNextFeature();
+                }
+
+                swApp.CloseDoc(masterModelPath);
+                Log.Information("Master Model closed.");
+            }
+            else
+            {
+                Log.Error("Failed to open Master Model silently.");
+            }
+
+            Log.Information("End of the investigation\n");
+        }
     }
 }
