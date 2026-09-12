@@ -171,12 +171,12 @@ namespace SwJsonExporter.Readers
 
                             if (massProps != null && massProps.Length >= 6)
                             {
-                                double mass = massProps[3];
-                                double volume = massProps[4];
-                                double surfaceArea = massProps[5];
+                                double mass = massProps[0];      
+                                double volume = massProps[1];    
+                                double surfaceArea = massProps[2]; 
 
-                                Log.Information("  -> ТЕЛО: {BodyName} | CutList: {CutName}", localBodyName, swFeat.Name);
-                                Log.Information("     Масса: {Mass} | Объем: {Vol}", mass, volume);
+                                Log.Information("  -> Body: {BodyName} | CutList: {CutName}", localBodyName, swFeat.Name);
+                                Log.Information("     Mass: {Mass} | Volume: {Vol}", mass, volume);
                             }
                         }
 
@@ -325,11 +325,11 @@ namespace SwJsonExporter.Readers
                     {
                         localSignatures.Add(new BodySignature(
                             swBody.Name,
-                            Math.Round(massProps[4], 5), // Volume
-                            Math.Round(massProps[5], 5), // SurfaceArea
-                            Math.Round(massProps[0], 5), // X
-                            Math.Round(massProps[1], 5), // Y
-                            Math.Round(massProps[2], 5)  // Z
+                            Math.Round(massProps[1], 5), // [1] Volume
+                            Math.Round(massProps[2], 5), // [2] SurfaceArea
+                            Math.Round(massProps[3], 5), // [3] X
+                            Math.Round(massProps[4], 5), // [4] Y
+                            Math.Round(massProps[5], 5)  // [5] Z
                         ));
                     }
                 }
@@ -375,11 +375,11 @@ namespace SwJsonExporter.Readers
 
                                 if (mProps != null && mProps.Length >= 6)
                                 {
-                                    double mVol = Math.Round(mProps[4], 5);
-                                    double mArea = Math.Round(mProps[5], 5);
-                                    double mX = Math.Round(mProps[0], 5);
-                                    double mY = Math.Round(mProps[1], 5);
-                                    double mZ = Math.Round(mProps[2], 5);
+                                    double mVol = Math.Round(mProps[1], 5);
+                                    double mArea = Math.Round(mProps[2], 5);
+                                    double mX = Math.Round(mProps[3], 5);
+                                    double mY = Math.Round(mProps[4], 5);
+                                    double mZ = Math.Round(mProps[5], 5);
 
                                     foreach (var sig in localSignatures)
                                     {
