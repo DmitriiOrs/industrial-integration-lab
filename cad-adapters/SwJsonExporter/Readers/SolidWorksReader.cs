@@ -14,6 +14,8 @@ namespace SwJsonExporter.Readers
         private static readonly ILogger Log = Serilog.Log.ForContext<SolidWorksReader>();
         private readonly SolidWorksConnector _connector = new();
 
+        private readonly Dictionary<string, IModelDoc2> _openMasterModels = new(StringComparer.OrdinalIgnoreCase);
+
         public bool IsAvailable() => true;
 
         public CanonicalProduct ReadActiveDocument()
@@ -31,6 +33,20 @@ namespace SwJsonExporter.Readers
             }
             finally
             {
+                if (swApp != null)
+                {
+                    foreach (var kvp in _openMasterModels)
+                    {
+                        Log.Information("Closing cached Master Model: {Path}", kvp.Key);
+                        swApp.CloseDoc(kvp.Key);
+                        if (kvp.Value != null)
+                        {
+                            Marshal.ReleaseComObject(kvp.Value);
+                        }
+                    }
+                    _openMasterModels.Clear();
+                }
+
                 if (swModel != null)
                 {
                     Marshal.ReleaseComObject(swModel);
@@ -59,6 +75,7 @@ namespace SwJsonExporter.Readers
                 Path = assemblyName,
                 Level = 0,
                 Type = "Assembly",
+                IsVirtual = false,
                 CustomProperties = ExtractFromManagers(swModel, rootManagers)
             };
 
@@ -123,12 +140,12 @@ namespace SwJsonExporter.Readers
             }
             else
             {
-                InvestigateInsertedParts(comp, swApp, currentNode);
-                ExtractCutListsFromPart(comp, currentNode);
+                var masterPropertiesMap = InvestigateInsertedParts(comp, swApp);
+                ExtractCutListsFromPart(comp, currentNode, masterPropertiesMap);
             }
         }
 
-        private void ExtractCutListsFromPart(Component2 comp, CanonicalProduct currentNode)
+        private void ExtractCutListsFromPart(Component2 comp, CanonicalProduct currentNode, Dictionary<string, Dictionary<string, string>> masterPropertiesMap)
         {
             IModelDoc2 swModel = (IModelDoc2)comp.GetModelDoc2();
             if (swModel == null) return;
@@ -143,10 +160,12 @@ namespace SwJsonExporter.Readers
                     if (swBodyFolder != null && swBodyFolder.GetBodyCount() > 0)
                     {
                         object[] bodies = (object[])swBodyFolder.GetBodies();
+                        string? localBodyName = null;
+
                         if (bodies != null && bodies.Length > 0)
                         {
                             Body2 swBody = (Body2)bodies[0];
-                            string bodyName = swBody.Name;
+                            localBodyName = swBody.Name;
 
                             double[] massProps = (double[])swBody.GetMassProperties(1.0);
 
@@ -156,8 +175,18 @@ namespace SwJsonExporter.Readers
                                 double volume = massProps[4];
                                 double surfaceArea = massProps[5];
 
-                                Log.Information("  -> ТЕЛО: {BodyName} | CutList: {CutName}", bodyName, swFeat.Name);
+                                Log.Information("  -> ТЕЛО: {BodyName} | CutList: {CutName}", localBodyName, swFeat.Name);
                                 Log.Information("     Масса: {Mass} | Объем: {Vol}", mass, volume);
+                            }
+                        }
+
+                        var cutListProperties = ExtractCutListProperties(swFeat);
+
+                        if (localBodyName != null && masterPropertiesMap.TryGetValue(localBodyName, out var masterProps))
+                        {
+                            foreach (var prop in masterProps)
+                            {
+                                cutListProperties[$"Master_{prop.Key}"] = prop.Value;
                             }
                         }
 
@@ -169,7 +198,8 @@ namespace SwJsonExporter.Readers
                             ParentId = currentNode.Id,
                             Path = $"{currentNode.Path}/{swFeat.Name}",
                             Type = "SheetMetalCut",
-                            CustomProperties = ExtractCutListProperties(swFeat)
+                            IsVirtual = false,
+                            CustomProperties = cutListProperties
                         };
 
                         currentNode.ChildNodes.Add(cutListNode);
@@ -239,10 +269,12 @@ namespace SwJsonExporter.Readers
             return properties;
         }
 
-        private void InvestigateInsertedParts(Component2 swComponent, ISldWorks swApp, CanonicalProduct currentNode)
+        private Dictionary<string, Dictionary<string, string>> InvestigateInsertedParts(Component2 swComponent, ISldWorks swApp)
         {
+            var resultMap = new Dictionary<string, Dictionary<string, string>>();
+
             IModelDoc2 swModel = (IModelDoc2)swComponent.GetModelDoc2();
-            if (swModel == null) return;
+            if (swModel == null) return resultMap;
 
             Log.Information("--- Investigation of the part: {CompName} ---", swComponent.Name2);
 
@@ -276,7 +308,7 @@ namespace SwJsonExporter.Readers
             if (string.IsNullOrEmpty(masterModelPath))
             {
                 Log.Information("End of the investigation\n");
-                return;
+                return resultMap;
             }
 
             var localSignatures = new List<BodySignature>();
@@ -303,11 +335,25 @@ namespace SwJsonExporter.Readers
                 }
             }
 
-            int errors = 0;
-            int warnings = 0;
-            Log.Information("Opening Master Model silently to extract Cut List properties...");
+            IModelDoc2? masterModel = null;
 
-            IModelDoc2 masterModel = swApp.OpenDoc6(masterModelPath, 1, 2, "", ref errors, ref warnings);
+            if (_openMasterModels.TryGetValue(masterModelPath, out var cachedModel))
+            {
+                Log.Information("Using cached Master Model: {Path}", masterModelPath);
+                masterModel = cachedModel;
+            }
+            else
+            {
+                int errors = 0;
+                int warnings = 0;
+                Log.Information("Opening Master Model silently to extract Cut List properties: {Path}", masterModelPath);
+                masterModel = swApp.OpenDoc6(masterModelPath, 1, 2, "", ref errors, ref warnings);
+
+                if (masterModel != null)
+                {
+                    _openMasterModels[masterModelPath] = masterModel;
+                }
+            }
 
             if (masterModel != null)
             {
@@ -349,11 +395,11 @@ namespace SwJsonExporter.Readers
                                             Log.Information("MATCH: '{Local}' == '{MasterCut}'", sig.LocalName, masterFeat.Name);
 
                                             var properties = ExtractCutListProperties(masterFeat);
+                                            resultMap[sig.LocalName] = properties;
+
                                             foreach (var prop in properties)
                                             {
-                                                string propKey = $"Master_{masterFeat.Name}_{prop.Key}";
-                                                currentNode.CustomProperties[propKey] = prop.Value;
-                                                Log.Information("    + {Key}: {Value}", propKey, prop.Value);
+                                                Log.Information("    + {Key}: {Value}", prop.Key, prop.Value);
                                             }
                                         }
                                     }
@@ -364,8 +410,7 @@ namespace SwJsonExporter.Readers
                     masterFeat = (Feature)masterFeat.GetNextFeature();
                 }
 
-                swApp.CloseDoc(masterModelPath);
-                Log.Information("Master Model closed.");
+                Log.Information("Finished reading Master Model (kept in cache).");
             }
             else
             {
@@ -373,6 +418,7 @@ namespace SwJsonExporter.Readers
             }
 
             Log.Information("End of the investigation\n");
+            return resultMap;
         }
     }
 }
