@@ -11,6 +11,8 @@ namespace SwJsonExporter.Domain
 
         public string Type { get; set; } = "Part";
 
+        public bool IsVirtual { get; set; }
+
         public Dictionary<string, string> CustomProperties { get; set; } = new();
 
         public List<CanonicalProduct> ChildNodes { get; set; } = new();

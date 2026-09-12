@@ -87,6 +87,11 @@ namespace SwJsonExporter.Readers
             string[] childManagers = new string[] { comp.ReferencedConfiguration, "" };
             bool isSubAssembly = (comp.GetChildren() != null && ((object[])comp.GetChildren()).Length > 0);
 
+            bool isVirtual = comp.IsVirtual;
+
+            string rawName = comp.Name2;
+            string cleanName = isVirtual && rawName.Contains('^') ? rawName.Split('^')[0] : rawName;
+
             IModelDoc2 childModel = (IModelDoc2)comp.GetModelDoc2();
 
             var properties = childModel != null
@@ -95,12 +100,13 @@ namespace SwJsonExporter.Readers
 
             var currentNode = new CanonicalProduct
             {
-                Id = $"{comp.Name2}-CADID-{comp.GetID()}",
-                Name = comp.Name2,
+                Id = $"{rawName}-CADID-{comp.GetID()}",
+                Name = cleanName,
                 Level = parentNode.Level + 1,
                 ParentId = parentNode.Id,
-                Path = $"{parentNode.Path}/{comp.Name2}",
+                Path = $"{parentNode.Path}/{cleanName}",
                 Type = isSubAssembly ? "SubAssembly" : "Part",
+                IsVirtual = isVirtual,
                 CustomProperties = properties
             };
 
