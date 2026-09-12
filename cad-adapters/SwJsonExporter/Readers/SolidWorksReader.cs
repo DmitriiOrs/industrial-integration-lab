@@ -99,10 +99,16 @@ namespace SwJsonExporter.Readers
 
         private void TraverseComponent(Component2 comp, CanonicalProduct parentNode, ISldWorks swApp)
         {
-            if (comp.IsSuppressed()) return;
+            if (comp.IsSuppressed())
+            {
+                Log.Debug("Skipping suppressed component: {CompName}", comp.Name2);
+                return;
+            }
 
             string[] childManagers = new string[] { comp.ReferencedConfiguration, "" };
-            bool isSubAssembly = (comp.GetChildren() != null && ((object[])comp.GetChildren()).Length > 0);
+
+            object[]? children = (object[])comp.GetChildren();
+            bool isSubAssembly = children != null && children.Length > 0;
 
             bool isVirtual = comp.IsVirtual;
 
@@ -115,6 +121,9 @@ namespace SwJsonExporter.Readers
             ? ExtractFromManagers(childModel, childManagers)
             : new Dictionary<string, string>();
 
+            string sourcePath = comp.GetPathName();
+            string configName = comp.ReferencedConfiguration;
+
             var currentNode = new CanonicalProduct
             {
                 Id = $"{rawName}-CADID-{comp.GetID()}",
@@ -124,6 +133,8 @@ namespace SwJsonExporter.Readers
                 Path = $"{parentNode.Path}/{cleanName}",
                 Type = isSubAssembly ? "SubAssembly" : "Part",
                 IsVirtual = isVirtual,
+                SourceDocument = string.IsNullOrEmpty(sourcePath) ? null : sourcePath,
+                Configuration = string.IsNullOrEmpty(configName) ? null : configName,
                 CustomProperties = properties
             };
 
@@ -131,8 +142,7 @@ namespace SwJsonExporter.Readers
 
             if (isSubAssembly)
             {
-                object[] children = (object[])comp.GetChildren();
-                foreach (object childObj in children)
+                foreach (object childObj in children!)
                 {
                     Component2 childComp = (Component2)childObj;
                     TraverseComponent(childComp, currentNode, swApp);

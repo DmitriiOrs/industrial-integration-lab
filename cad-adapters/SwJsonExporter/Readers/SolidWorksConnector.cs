@@ -10,8 +10,11 @@ namespace SwJsonExporter.Readers
         private static readonly ILogger Log = Serilog.Log.ForContext<SolidWorksConnector>();
         public ISldWorks Connect()
         {
-            var swApp = (ISldWorks)Activator.CreateInstance(Type.GetTypeFromProgID("SldWorks.Application")!)!;
-            if (swApp == null) 
+            var swType = Type.GetTypeFromProgID("SldWorks.Application");
+            if (swType == null) throw new InvalidOperationException("SOLIDWORKS COM type not found.");
+
+            var swApp = (ISldWorks?)Activator.CreateInstance(swType);
+            if (swApp == null)
             {
                 throw new InvalidOperationException("Failed to connect to SOLIDWORKS.");
             }

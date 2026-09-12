@@ -21,12 +21,18 @@ namespace SwJsonExporter.Exporters
 
             string jsonResult = JsonSerializer.Serialize(product, jsonOptions);
 
-            Log.Information("UPLOADED CANONICAL PRODUCT MODEL (JSON)");
-
             string filePath = @"C:\Temp\ExportedAssembly.json";
+
+            var dir = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            Log.Information("Serializing canonical product model to JSON...");
             File.WriteAllText(filePath, jsonResult);
 
-            Log.Information("[SUCCESS] File saved successfully");
+            Log.Information("JSON exported successfully to {FilePath}", filePath);
         }
     }
     
