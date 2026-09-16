@@ -6,8 +6,11 @@ using System;
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
-    .WriteTo.Console()
-    .WriteTo.File(@"C:\Temp\ExportLogs\etl-export-.txt", rollingInterval: RollingInterval.Day)
+    .WriteTo.Console(
+    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(@"C:\Temp\ExportLogs\etl-export-.txt", 
+    rollingInterval: RollingInterval.Day,
+    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
 try
