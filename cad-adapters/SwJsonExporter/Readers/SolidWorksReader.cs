@@ -181,9 +181,21 @@ namespace SwJsonExporter.Readers
 
                             if (massProps != null && massProps.Length >= 6)
                             {
-                                double mass = massProps[0];      
-                                double volume = massProps[1];    
-                                double surfaceArea = massProps[2]; 
+                                double mass = Math.Round(massProps[5], 5);
+                                double volume = 0;
+                                double surfaceArea = 0;
+
+                                int bodyType = swBody.GetType(); // 0 = Solid, 1 = Sheet, 2 = Wire
+
+                                if (bodyType == 0)
+                                {
+                                    volume = Math.Round(massProps[3], 5);
+                                    surfaceArea = Math.Round(massProps[4], 5);
+                                }
+                                else if (bodyType == 1)
+                                {
+                                    surfaceArea = Math.Round(massProps[3], 5);
+                                }
 
                                 Log.Information("  -> Body: {BodyName} | CutList: {CutName}", localBodyName, swFeat.Name);
                                 Log.Information("     Mass: {Mass} | Volume: {Vol}", mass, volume);
@@ -333,14 +345,30 @@ namespace SwJsonExporter.Readers
 
                     if (massProps != null && massProps.Length >= 6)
                     {
-                        localSignatures.Add(new BodySignature(
-                            swBody.Name,
-                            Math.Round(massProps[1], 5), // [1] Volume
-                            Math.Round(massProps[2], 5), // [2] SurfaceArea
-                            Math.Round(massProps[3], 5), // [3] X
-                            Math.Round(massProps[4], 5), // [4] Y
-                            Math.Round(massProps[5], 5)  // [5] Z
-                        ));
+                        double mass = Math.Round(massProps[5], 5);
+                        double volume = 0;
+                        double surfaceArea = 0;
+
+                        int bodyType = swBody.GetType(); // 0 = Solid, 1 = Sheet, 2 = Wire
+
+                        if (bodyType == 0)
+                        {
+                            volume = Math.Round(massProps[3], 5);
+                            surfaceArea = Math.Round(massProps[4], 5);
+                        }
+                        else if (bodyType == 1)
+                        {
+                            surfaceArea = Math.Round(massProps[3], 5);
+                        }
+
+                        Log.Information("  -> Body: {BodyName} | Type: {Type} | Mass: {Mass} | Vol: {Vol}",
+                        swBody.Name, bodyType, mass, volume);
+
+                        double cX = Math.Round(massProps[0], 5);
+                        double cY = Math.Round(massProps[1], 5);
+                        double cZ = Math.Round(massProps[2], 5);
+
+                        localSignatures.Add(new BodySignature(swBody.Name, volume, surfaceArea, cX, cY, cZ));
                     }
                 }
             }
@@ -385,11 +413,23 @@ namespace SwJsonExporter.Readers
 
                                 if (mProps != null && mProps.Length >= 6)
                                 {
-                                    double mVol = Math.Round(mProps[1], 5);
-                                    double mArea = Math.Round(mProps[2], 5);
-                                    double mX = Math.Round(mProps[3], 5);
-                                    double mY = Math.Round(mProps[4], 5);
-                                    double mZ = Math.Round(mProps[5], 5);
+                                    double mX = Math.Round(mProps[0], 5);
+                                    double mY = Math.Round(mProps[1], 5);
+                                    double mZ = Math.Round(mProps[2], 5);
+
+                                    double mVol = 0;
+                                    double mArea = 0;
+                                    int mBodyType = masterBody.GetType();
+
+                                    if (mBodyType == 0)
+                                    {
+                                        mVol = Math.Round(mProps[3], 5);
+                                        mArea = Math.Round(mProps[4], 5);
+                                    }
+                                    else if (mBodyType == 1)
+                                    {
+                                        mArea = Math.Round(mProps[3], 5);
+                                    }
 
                                     foreach (var sig in localSignatures)
                                     {
